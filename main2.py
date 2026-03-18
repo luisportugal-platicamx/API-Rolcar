@@ -130,3 +130,14 @@ def cerrar_orden(api_key: str = Depends(validar_api_key)):
         "mensaje": f"¡Orden {carrito_actual['id_orden']} cerrada exitosamente!",
         "total_cobrado": round(total, 2)
     }
+
+@app.get("/api/v1/productos/lista")
+def listar_nombres_productos(api_key: str = Depends(validar_api_key)):
+    # Usamos list comprehension para extraer solo el campo "nombre"
+    nombres = [prod["nombre"] for prod in PRODUCTOS_DB]
+    
+    return {
+        "status": "success",
+        "total": len(nombres),
+        "productos_disponibles": nombres
+    }
