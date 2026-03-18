@@ -103,9 +103,19 @@ def cerrar_orden():
     total = sum(item["precio"] * item["cantidad"] for item in carrito_actual["items"])
     
     # Aquí en un sistema real, guardaríamos esto en BD y limpiaríamos el carrito
-    
     return {
         "status": "success", 
         "mensaje": f"¡Orden {carrito_actual['id_orden']} cerrada exitosamente!",
         "total_cobrado": round(total, 2)
+    }
+# F. Listar todos los productos (Solo nombres para el catálogo)
+@app.get("/api/v1/productos/lista")
+def listar_nombres_productos(api_key: str = Depends(validar_api_key)):
+    # Usamos list comprehension para extraer solo el campo "nombre" de cada producto
+    nombres = [prod["nombre"] for prod in PRODUCTOS_DB]
+    
+    return {
+        "status": "success",
+        "total": len(nombres),
+        "productos_disponibles": nombres
     }
