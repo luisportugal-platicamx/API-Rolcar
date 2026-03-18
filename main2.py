@@ -1,11 +1,26 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, Depends, HTTPException, Security, status
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
-from typing import List, Optional
 
 app = FastAPI(title="API Simulada - Agente Rolcar (Demo)")
 
 # ==========================================
-# 1. NUESTRA BASE DE DATOS FALTAL (EN MEMORIA)
+# 0. CONFIGURACIÓN DE SEGURIDAD (API KEY)
+# ==========================================
+API_KEY_NAME = "X-API-Key"
+API_KEY_SECRETA = "rolcar_agente_2026_secreto" 
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+async def validar_api_key(api_key: str = Security(api_key_header)):
+    if api_key == API_KEY_SECRETA:
+        return api_key
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Acceso denegado: API Key inválida o faltante"
+    )
+
+# ==========================================
+# 1. NUESTRA BASE DE DATOS FALSA (EN MEMORIA)
 # ==========================================
 PRODUCTOS_DB = [
     {"codigo_interno": "02AB005", "nombre": "BUJIA NISSAN TSURU II 1.6 L", "precio": 43.28},
@@ -15,15 +30,14 @@ PRODUCTOS_DB = [
     {"codigo_interno": "02BU094", "nombre": "BALATAS DELANTERAS NISSAN VERSA", "precio": 450.00}
 ]
 
-# Simularemos un carrito guardándolo en una variable global
 carrito_actual = {
     "id_orden": "ORD-0001",
-    "estado": "abierto", # Puede ser "abierto" o "cerrado"
+    "estado": "abierto", 
     "items": []
 }
 
 # ==========================================
-# 2. MODELOS DE DATOS (Lo que el Agente nos envía)
+# 2. MODELOS DE DATOS
 # ==========================================
 class ItemCarrito(BaseModel):
     codigo_interno: str
@@ -33,15 +47,23 @@ class ItemCarrito(BaseModel):
 # 3. ENDPOINTS PARA EL AGENTE DE IA
 # ==========================================
 
-# A. Buscar Productos (El Agente usará esto para ver qué hay)
+# A. Listar todos los productos (Catálogo)
+@app.get("/api/v1/productos/lista")
+def listar_nombres_productos(api_key: str = Depends(validar_api_key)):
+    nombres = [prod["nombre"] for prod in PRODUCTOS_DB]
+    return {
+        "status": "success",
+        "total": len(nombres),
+        "productos_disponibles": nombres
+    }
+
+# B. Buscar Productos Específicos
 @app.get("/api/v1/productos/buscar")
-def buscar_productos(query: str = ""):
+def buscar_productos(query: str = "", api_key: str = Depends(validar_api_key)):
     resultados = []
-    # Buscamos coincidencias ignorando mayúsculas y minúsculas
     for prod in PRODUCTOS_DB:
         if query.lower() in prod["nombre"].lower() or query.lower() in prod["codigo_interno"].lower():
             resultados.append(prod)
-            
     return {
         "status": "success",
         "query": query,
@@ -49,73 +71,55 @@ def buscar_productos(query: str = ""):
         "data": resultados
     }
 
-# B. Ver el Carrito Actual
+# C. Ver el Carrito Actual
 @app.get("/api/v1/carrito")
-def ver_carrito():
+def ver_carrito(api_key: str = Depends(validar_api_key)):
     total = sum(item["precio"] * item["cantidad"] for item in carrito_actual["items"])
     return {
         "carrito": carrito_actual,
         "total_pagar": round(total, 2)
     }
 
-# C. Agregar al carrito
+# D. Agregar al carrito
 @app.post("/api/v1/carrito/agregar")
-def agregar_producto(item: ItemCarrito):
+def agregar_producto(item: ItemCarrito, api_key: str = Depends(validar_api_key)):
     if carrito_actual["estado"] == "cerrado":
         raise HTTPException(status_code=400, detail="La orden ya está cerrada. Crea un nuevo carrito.")
         
-    # Buscamos si el producto existe en nuestra BD falsa
     producto = next((p for p in PRODUCTOS_DB if p["codigo_interno"] == item.codigo_interno), None)
-    
     if not producto:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
         
-    # Agregamos al carrito
     carrito_actual["items"].append({
         "codigo_interno": producto["codigo_interno"],
         "nombre": producto["nombre"],
         "precio": producto["precio"],
         "cantidad": item.cantidad
     })
-    
     return {"status": "success", "mensaje": f"Agregaste {item.cantidad}x {producto['nombre']} al carrito."}
 
-# D. Quitar del carrito
+# E. Quitar del carrito
 @app.delete("/api/v1/carrito/quitar/{codigo_interno}")
-def quitar_producto(codigo_interno: str):
+def quitar_producto(codigo_interno: str, api_key: str = Depends(validar_api_key)):
     global carrito_actual
-    # Filtramos el carrito para dejar todos menos el que queremos borrar
     items_filtrados = [item for item in carrito_actual["items"] if item["codigo_interno"] != codigo_interno]
-    
     if len(items_filtrados) == len(carrito_actual["items"]):
         raise HTTPException(status_code=404, detail="El producto no estaba en el carrito")
         
     carrito_actual["items"] = items_filtrados
     return {"status": "success", "mensaje": "Producto removido del carrito"}
 
-# E. Cerrar la Orden (Checkout)
+# F. Cerrar la Orden / Checkout
 @app.post("/api/v1/carrito/cerrar")
-def cerrar_orden():
+def cerrar_orden(api_key: str = Depends(validar_api_key)):
     if not carrito_actual["items"]:
         raise HTTPException(status_code=400, detail="El carrito está vacío, no se puede cerrar la orden.")
         
     carrito_actual["estado"] = "cerrado"
     total = sum(item["precio"] * item["cantidad"] for item in carrito_actual["items"])
     
-    # Aquí en un sistema real, guardaríamos esto en BD y limpiaríamos el carrito
     return {
         "status": "success", 
         "mensaje": f"¡Orden {carrito_actual['id_orden']} cerrada exitosamente!",
         "total_cobrado": round(total, 2)
-    }
-# F. Listar todos los productos (Solo nombres para el catálogo)
-@app.get("/api/v1/productos/lista")
-def listar_nombres_productos(api_key: str = Depends(validar_api_key)):
-    # Usamos list comprehension para extraer solo el campo "nombre" de cada producto
-    nombres = [prod["nombre"] for prod in PRODUCTOS_DB]
-    
-    return {
-        "status": "success",
-        "total": len(nombres),
-        "productos_disponibles": nombres
     }
